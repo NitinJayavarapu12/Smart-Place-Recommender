@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+requests
+sentence-transformers
+numpy
+sqlalchemy
+cachetools
+jinja2

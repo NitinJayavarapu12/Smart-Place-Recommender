@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Smart Place Recommender</title>
+
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Smart Place Recommender</h1>
+      <p>Semantic + distance ranking, with feedback personalization.</p>
+    </header>
+
+    <section class="card">
+      <div class="row">
+        <div class="col">
+          <label>Query</label>
+          <input id="query" value="coffee shop to work" />
+        </div>
+        <div class="col">
+          <label>User ID (optional)</label>
+          <input id="user_id" value="nithu_test" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label>Latitude</label>
+          <input id="lat" value="30.4213" />
+        </div>
+        <div class="col">
+          <label>Longitude</label>
+          <input id="lng" value="-87.2169" />
+        </div>
+        <div class="col">
+          <label>Radius (m)</label>
+          <input id="radius_m" value="2000" />
+        </div>
+        <div class="col">
+          <label>Max results</label>
+          <input id="max_results" value="8" />
+        </div>
+      </div>
+
+      <button id="btnSearch">Search</button>
+      <span id="status"></span>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Results</h2>
+        <div id="results"></div>
+      </div>
+
+      <div class="card">
+        <h2>Map</h2>
+        <div id="map"></div>
+      </div>
+    </section>
+
+    <footer>
+      <a href="/docs" target="_blank">API Docs</a>
+    </footer>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
