@@ -1,93 +1,110 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import List, Optional
-
-from app.api.schemas import RecommendResponse, FeedbackResponse
+from app.api.schemas import (
+    RecommendRequest, RecommendResponse, PlaceResult, ScoreBreakdown,
+    FeedbackRequest, FeedbackResponse, HealthResponse
+)
 from app.services.places_provider import fetch_places
 from app.services.ranker import rank_places
-from app.services.personalization import get_user_category_boosts
-from app.db.database import SessionLocal
-from app.db.models import Feedback
+from app.services.personalization import get_user_profile, save_feedback, clear_user_feedback
 
-router = APIRouter(tags=["Recommender"])
-feedback_router = APIRouter(tags=["Feedback"])
+router = APIRouter()
 
 
-class RecommendRequest(BaseModel):
-    lat: float = Field(..., examples=[30.4213])
-    lng: float = Field(..., examples=[-87.2169])
-    query: str = Field(..., examples=["quiet coffee shop to work"])
-    radius_m: int = Field(default=2000, ge=100, le=20000, examples=[2000])
-    max_results: int = Field(default=5, ge=1, le=25, examples=[5])
-    categories: Optional[List[str]] = Field(default=None, examples=[["cafe", "restaurant"]])
-    open_now: bool = Field(default=True, examples=[True])
-    user_id: Optional[str] = Field(default=None, examples=["nitin_test"])
+@router.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["System"],
+    summary="Health check",
+)
+async def health():
+    return HealthResponse(
+        status="ok",
+        version="2.0.0",
+        embedding_model="all-MiniLM-L6-v2",
+    )
 
-class FeedbackRequest(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=64)
-    place_id: str = Field(..., min_length=1, max_length=128)
-    action: str = Field(..., pattern="^(like|dislike|click)$")
-    category_hint: Optional[str] = None
 
-@router.get("/health")
-def health():
-    return {"status": "ok"}
-
-@router.post("/recommend", response_model=RecommendResponse)
-def recommend(req: RecommendRequest):
+@router.post(
+    "/recommend",
+    response_model=RecommendResponse,
+    tags=["Recommendations"],
+    summary="Get personalized place recommendations",
+    description=(
+        "Fetches nearby places from OpenStreetMap and ranks them using a hybrid scoring system "
+        "combining semantic similarity, distance, keyword matching, and user personalization."
+    ),
+)
+async def recommend(req: RecommendRequest):
+    # Fetch places from Overpass API
     try:
-        places = fetch_places(
-            lat=req.lat,
-            lng=req.lng,
-            radius_m=req.radius_m,
-            categories=req.categories,
-            open_now=req.open_now,
+        places = await fetch_places(req.lat, req.lng, req.radius_m)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if not places:
+        return RecommendResponse(
+            query=req.query,
+            total_fetched=0,
+            total_returned=0,
+            results=[]
         )
 
-        boosts = {}
-        if req.user_id:
-            db = SessionLocal()
-            try:
-                boosts = get_user_category_boosts(db, req.user_id)
-            finally:
-                db.close()
+    # Load personalization profile if user_id provided
+    user_profile = {}
+    if req.user_id:
+        user_profile = get_user_profile(req.user_id)
 
-        ranked = rank_places(
-            user_lat=req.lat,
-            user_lng=req.lng,
-            user_query=req.query,
-            places=places,
-            radius_m=req.radius_m,
-            user_boosts=boosts,
+    # Rank places using hybrid scoring
+    ranked = rank_places(
+        query=req.query,
+        user_lat=req.lat,
+        user_lng=req.lng,
+        radius_m=req.radius_m,
+        places=places,
+        user_profile=user_profile,
+        max_results=req.max_results,
+    )
+
+    results = [
+        PlaceResult(
+            place_id=p["place_id"],
+            name=p["name"],
+            category=p["category"],
+            lat=p["lat"],
+            lng=p["lng"],
+            distance_m=p["distance_m"],
+            tags=p["tags"],
+            score=ScoreBreakdown(**p["score"]),
         )
+        for p in ranked
+    ]
 
-        return {"results": ranked[: req.max_results]}
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    return RecommendResponse(
+        query=req.query,
+        total_fetched=len(places),
+        total_returned=len(results),
+        results=results,
+    )
 
-@feedback_router.post("/feedback", response_model=FeedbackResponse)
-def feedback(req: FeedbackRequest):
-    db = SessionLocal()
-    try:
-        row = Feedback(
-            user_id=req.user_id,
-            place_id=req.place_id,
-            action=req.action,
-            category_hint=req.category_hint,
-        )
-        db.add(row)
-        db.commit()
-        return {"status": "saved"}
-    finally:
-        db.close()
 
-@feedback_router.delete("/feedback/{user_id}")
-def clear_feedback(user_id: str):
-    db = SessionLocal()
-    try:
-        db.query(Feedback).filter(Feedback.user_id == user_id).delete()
-        db.commit()
-        return {"status": "cleared"}
-    finally:
-        db.close()
+@router.post(
+    "/feedback",
+    response_model=FeedbackResponse,
+    tags=["Personalization"],
+    summary="Submit feedback on a place",
+    description="Records a like, dislike, or click. Used to personalize future recommendations.",
+)
+async def submit_feedback(req: FeedbackRequest):
+    save_feedback(req.user_id, req.place_id, req.action.value, req.category_hint)
+    return FeedbackResponse(success=True, message="Feedback recorded.")
 
+
+@router.delete(
+    "/feedback/{user_id}",
+    response_model=FeedbackResponse,
+    tags=["Personalization"],
+    summary="Clear all feedback for a user",
+)
+async def clear_feedback(user_id: str):
+    clear_user_feedback(user_id)
+    return FeedbackResponse(success=True, message=f"Feedback cleared for user '{user_id}'.")

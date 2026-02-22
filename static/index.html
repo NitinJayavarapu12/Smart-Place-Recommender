@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Place Recommender</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0d0f;
+      --surface: #16161a;
+      --surface2: #1e1e24;
+      --border: #2a2a35;
+      --accent: #c8f04e;
+      --accent-dim: #a8cc3a;
+      --text: #e8e8f0;
+      --text-muted: #7a7a90;
+      --text-dim: #4a4a60;
+      --red: #ff6b6b;
+      --green: #6bffb8;
+      --radius: 14px;
+      --radius-sm: 8px;
+      --sidebar: 420px;
+      --font-display: 'DM Serif Display', Georgia, serif;
+      --font-body: 'DM Sans', system-ui, sans-serif;
+    }
+
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-body); }
+
+    #app { display: flex; height: 100vh; }
+
+    #sidebar {
+      width: var(--sidebar);
+      min-width: var(--sidebar);
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      z-index: 10;
+      overflow: hidden;
+    }
+
+    #header {
+      padding: 28px 28px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .logo { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+
+    .logo-dot {
+      width: 10px; height: 10px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 12px var(--accent);
+      animation: pulse 2.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+
+    .logo-title { font-family: var(--font-display); font-size: 20px; color: var(--text); }
+    .logo-sub { font-size: 11px; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-left: 20px; }
+
+    #search-panel {
+      padding: 20px 28px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .input-group { display: flex; flex-direction: column; gap: 5px; }
+
+    label { font-size: 11px; font-weight: 500; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); }
+
+    input[type="text"], input[type="number"] {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 14px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      width: 100%;
+    }
+
+    input[type="text"]:focus, input[type="number"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(200, 240, 78, 0.08);
+    }
+
+    input::placeholder { color: var(--text-dim); }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .checkbox-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .checkbox-row input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+    .checkbox-row span { font-size: 13px; color: var(--text-muted); }
+
+    #search-btn {
+      background: var(--accent);
+      color: #0d0d0f;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 12px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      margin-top: 2px;
+    }
+
+    #search-btn:hover { background: var(--accent-dim); }
+    #search-btn:active { transform: scale(0.98); }
+    #search-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    #status {
+      padding: 10px 28px;
+      font-size: 12px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .spinner {
+      width: 12px; height: 12px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #results {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 28px 28px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    #results::-webkit-scrollbar { width: 4px; }
+    #results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .results-header { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; font-weight: 500; }
+
+    .card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      background: var(--accent);
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .card:hover { border-color: #3a3a50; transform: translateX(2px); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .card:hover::before { opacity: 1; }
+    .card.active { border-color: var(--accent); }
+    .card.active::before { opacity: 1; }
+
+    .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+    .card-rank { font-size: 10px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.05em; flex-shrink: 0; margin-top: 2px; }
+    .card-name { font-family: var(--font-display); font-size: 16px; color: var(--text); flex: 1; line-height: 1.3; }
+    .card-score { font-size: 13px; font-weight: 600; color: var(--accent); flex-shrink: 0; }
+
+    .card-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+
+    .badge {
+      font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 4px;
+      background: rgba(200, 240, 78, 0.1); color: var(--accent); letter-spacing: 0.02em;
+    }
+
+    .card-dist { font-size: 12px; color: var(--text-muted); }
+
+    .score-bars { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .score-bar-row { display: flex; align-items: center; gap: 8px; }
+    .score-bar-label { font-size: 10px; color: var(--text-dim); width: 70px; flex-shrink: 0; }
+    .score-bar-track { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .score-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.5s ease; }
+    .score-bar-fill.dim { background: var(--text-dim); }
+    .score-bar-val { font-size: 10px; color: var(--text-dim); width: 28px; text-align: right; flex-shrink: 0; }
+
+    .card-actions { display: flex; gap: 6px; margin-top: 2px; }
+
+    .action-btn {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+      color: var(--text-muted); font-family: var(--font-body); font-size: 11px; font-weight: 500;
+      padding: 5px 10px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 4px;
+    }
+
+    .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .action-btn.liked { background: rgba(107, 255, 184, 0.1); border-color: var(--green); color: var(--green); }
+    .action-btn.disliked { background: rgba(255, 107, 107, 0.1); border-color: var(--red); color: var(--red); }
+
+    #map { flex: 1; z-index: 1; }
+
+    .leaflet-tile { filter: brightness(0.85) saturate(0.7); }
+    .leaflet-popup-content-wrapper {
+      background: var(--surface); color: var(--text); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+    .leaflet-popup-tip { background: var(--surface); }
+    .leaflet-popup-content { margin: 12px 14px; font-family: var(--font-body); }
+    .popup-name { font-family: var(--font-display); font-size: 15px; margin-bottom: 4px; }
+    .popup-cat { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+    .popup-score { font-size: 12px; color: var(--accent); font-weight: 600; }
+
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-dim); }
+    .empty-state .icon { font-size: 36px; margin-bottom: 10px; opacity: 0.5; }
+    .empty-state p { font-size: 13px; line-height: 1.6; }
+
+    #user-strip {
+      padding: 10px 28px; border-top: 1px solid var(--border); flex-shrink: 0;
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    #user-strip label { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+    #user-id-input { flex: 1; font-size: 12px; padding: 6px 10px; }
+
+    #clear-btn {
+      background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      color: var(--text-dim); font-size: 11px; padding: 5px 10px; cursor: pointer;
+      font-family: var(--font-body); transition: all 0.15s; white-space: nowrap;
+    }
+
+    #clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+    @media (max-width: 700px) {
+      #app { flex-direction: column; }
+      #sidebar { width: 100%; min-width: 0; height: 55vh; border-right: none; border-bottom: 1px solid var(--border); }
+      #map { height: 45vh; flex: none; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <aside id="sidebar">
+    <div id="header">
+      <div class="logo">
+        <div class="logo-dot"></div>
+        <span class="logo-title">Place Recommender</span>
+      </div>
+      <div class="logo-sub">Powered by OpenStreetMap + AI</div>
+    </div>
+
+    <div id="search-panel">
+      <div class="input-group">
+        <label>Query</label>
+        <input type="text" id="query" placeholder="quiet coffee shop to work…" />
+      </div>
+      <div class="input-group">
+        <label>Location</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="location" placeholder="New York, NY or 5th Ave, NYC…" style="flex:1;" />
+          <button onclick="detectLocation()" title="Use my current location" style="
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-muted);
+            font-size: 16px;
+            padding: 0 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            flex-shrink: 0;
+          " onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">📍</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="input-group">
+          <label>Radius (m)</label>
+          <input type="number" id="radius" value="1500" min="100" max="10000" />
+        </div>
+        <div class="input-group">
+          <label>Max Results</label>
+          <input type="number" id="max-results" value="10" min="1" max="30" />
+        </div>
+      </div>
+      <label class="checkbox-row">
+        <input type="checkbox" id="open-now" />
+        <span>Open now only (best effort)</span>
+      </label>
+      <button id="search-btn" onclick="search()">Search</button>
+    </div>
+
+    <div id="status"></div>
+
+    <div id="results">
+      <div class="empty-state">
+        <div class="icon">🗺️</div>
+        <p>Enter a query and your location<br>to find great places nearby.</p>
+      </div>
+    </div>
+
+    <div id="user-strip">
+      <label>USER ID</label>
+      <input type="text" id="user-id-input" placeholder="anonymous" />
+      <button id="clear-btn" onclick="clearFeedback()">Clear History</button>
+    </div>
+  </aside>
+
+  <div id="map"></div>
+</div>
+
+<script>
+  // ── Map Setup ─────────────────────────────────────────────────────────────
+  const map = L.map('map', { zoomControl: false }).setView([40.7128, -74.006], 13);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(map);
+
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  // Click on map to set coordinates
+  map.on('click', (e) => {
+    document.getElementById('lat').value = e.latlng.lat.toFixed(5);
+    document.getElementById('lng').value = e.latlng.lng.toFixed(5);
+    setStatus('📍 Location set. Press Search.');
+  });
+
+  // ── Geocoding ─────────────────────────────────────────────────────────────
+  let userLat = null;
+  let userLng = null;
+
+  // Click map to set location
+  map.on('click', (e) => {
+    userLat = e.latlng.lat;
+    userLng = e.latlng.lng;
+    document.getElementById('location').value = `${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
+    setStatus('📍 Location set from map. Press Search.');
+  });
+
+  async function geocodeLocation(query) {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
+    const res = await fetch(url, {
+      headers: { 'Accept-Language': 'en', 'User-Agent': 'SmartPlaceRecommender/2.0' }
+    });
+    const data = await res.json();
+    if (!data.length) throw new Error(`Location not found: "${query}"`);
+    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), display: data[0].display_name };
+  }
+
+  function detectLocation() {
+    if (!navigator.geolocation) {
+      setStatus('⚠️ Geolocation not supported by your browser.');
+      return;
+    }
+    setStatus('Detecting your location…', true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        userLat = pos.coords.latitude;
+        userLng = pos.coords.longitude;
+        document.getElementById('location').value = `${userLat.toFixed(5)}, ${userLng.toFixed(5)}`;
+        map.setView([userLat, userLng], 14);
+        setStatus('📍 Location detected. Enter a query and search.');
+      },
+      () => setStatus('⚠️ Could not detect location. Try typing it instead.')
+    );
+  }
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  let markers = [];
+  let activeCard = null;
+  let results = [];
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function setStatus(msg, loading = false) {
+    const el = document.getElementById('status');
+    el.innerHTML = loading
+      ? `<div class="spinner"></div><span>${msg}</span>`
+      : `<span>${msg}</span>`;
+  }
+
+  function clearMarkers() {
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+  }
+
+  function getUserId() {
+    return document.getElementById('user-id-input').value.trim() || 'anonymous';
+  }
+
+  function fmtDist(m) {
+    return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+  }
+
+  function accentMarker(color = '#c8f04e') {
+    return L.divIcon({
+      className: '',
+      html: `<div style="width:12px;height:12px;background:${color};border-radius:50%;border:2px solid #0d0d0f;box-shadow:0 0 8px ${color}88;"></div>`,
+      iconSize: [12, 12],
+      iconAnchor: [6, 6],
+    });
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  async function search() {
+    const query = document.getElementById('query').value.trim();
+    const locationInput = document.getElementById('location').value.trim();
+    if (!locationInput) { setStatus('⚠️ Please enter a location.'); return; }
+
+    // Geocode if we don't have coords yet, or if location input changed
+    try {
+      setStatus('Finding location…', true);
+      const geo = await geocodeLocation(locationInput);
+      userLat = geo.lat;
+      userLng = geo.lng;
+      map.setView([userLat, userLng], 14);
+    } catch (e) {
+      setStatus(`⚠️ ${e.message}`);
+      btn.disabled = false;
+      return;
+    }
+
+    const lat = userLat;
+    const lng = userLng;
+    const radius = parseInt(document.getElementById('radius').value);
+    const maxResults = parseInt(document.getElementById('max-results').value);
+    const openNow = document.getElementById('open-now').checked;
+    const userId = getUserId();
+
+    if (!query) { setStatus('⚠️ Please enter a query.'); return; }
+    
+    const btn = document.getElementById('search-btn');
+    btn.disabled = true;
+    setStatus('Fetching places…', true);
+    clearMarkers();
+
+    try {
+      const res = await fetch('/api/v1/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lng, query, radius_m: radius, max_results: maxResults, open_now: openNow, user_id: userId }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setStatus(`❌ Error: ${err.detail || res.statusText}`);
+        return;
+      }
+
+      const data = await res.json();
+      results = data.results;
+      setStatus(`Found ${data.total_returned} places from ${data.total_fetched} nearby.`);
+      renderResults(results);
+      renderMarkers(results, lat, lng);
+
+    } catch (e) {
+      setStatus(`❌ Request failed: ${e.message}`);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ── Render Results ────────────────────────────────────────────────────────
+  function renderResults(places) {
+    const el = document.getElementById('results');
+
+    if (!places.length) {
+      el.innerHTML = `<div class="empty-state"><div class="icon">😶</div><p>No results found.<br>Try a different query or larger radius.</p></div>`;
+      return;
+    }
+
+    const bars = (score) => [
+      { label: 'Semantic',  val: score.semantic,        main: true },
+      { label: 'Distance',  val: score.distance,        main: true },
+      { label: 'Keyword',   val: score.keyword,         main: false },
+      { label: 'Personal',  val: score.personalization, main: false },
+    ].map(item => `
+      <div class="score-bar-row">
+        <span class="score-bar-label">${item.label}</span>
+        <div class="score-bar-track">
+          <div class="score-bar-fill${item.main ? '' : ' dim'}" style="width:${(item.val * 100).toFixed(1)}%"></div>
+        </div>
+        <span class="score-bar-val">${(item.val * 100).toFixed(0)}%</span>
+      </div>
+    `).join('');
+
+    el.innerHTML = `<div class="results-header">${places.length} results</div>` + places.map((p, i) => `
+      <div class="card" id="card-${i}" onclick="focusPlace(${i})">
+        <div class="card-top">
+          <span class="card-rank">#${i + 1}</span>
+          <span class="card-name">${p.name}</span>
+          <span class="card-score">${(p.score.final * 100).toFixed(0)}</span>
+        </div>
+        <div class="card-meta">
+          <span class="badge">${p.category}</span>
+          <span class="card-dist">${fmtDist(p.distance_m)}</span>
+        </div>
+        <div class="score-bars">${bars(p.score)}</div>
+        <div class="card-actions" onclick="event.stopPropagation()">
+          <button class="action-btn" id="like-${i}" onclick="sendFeedback(${i}, 'like')">👍 Like</button>
+          <button class="action-btn" id="dislike-${i}" onclick="sendFeedback(${i}, 'dislike')">👎 Dislike</button>
+          <button class="action-btn" onclick="sendFeedback(${i}, 'click')">🔗 Visit</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // ── Render Markers ────────────────────────────────────────────────────────
+  function renderMarkers(places, userLat, userLng) {
+    const userMarker = L.marker([userLat, userLng], {
+      icon: L.divIcon({
+        className: '',
+        html: `<div style="width:14px;height:14px;background:#fff;border-radius:50%;border:3px solid #0d0d0f;box-shadow:0 0 12px rgba(255,255,255,0.6)"></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      })
+    }).addTo(map);
+    markers.push(userMarker);
+
+    const bounds = [[userLat, userLng]];
+
+    places.forEach((p, i) => {
+      const score = p.score.final;
+      const color = score > 0.6 ? '#c8f04e' : score > 0.4 ? '#f0c84e' : '#f07a4e';
+      const marker = L.marker([p.lat, p.lng], { icon: accentMarker(color) })
+        .addTo(map)
+        .bindPopup(`
+          <div class="popup-name">${p.name}</div>
+          <div class="popup-cat">${p.category} · ${fmtDist(p.distance_m)}</div>
+          <div class="popup-score">Score: ${(score * 100).toFixed(0)}/100</div>
+        `);
+      marker.on('click', () => focusPlace(i));
+      markers.push(marker);
+      bounds.push([p.lat, p.lng]);
+    });
+
+    map.fitBounds(bounds, { padding: [40, 40] });
+  }
+
+  // ── Focus Place ───────────────────────────────────────────────────────────
+  function focusPlace(idx) {
+    if (activeCard !== null) {
+      document.getElementById(`card-${activeCard}`)?.classList.remove('active');
+    }
+    activeCard = idx;
+    const card = document.getElementById(`card-${idx}`);
+    card?.classList.add('active');
+    card?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const place = results[idx];
+    if (place) {
+      map.setView([place.lat, place.lng], 16, { animate: true });
+      markers[idx + 1]?.openPopup();
+    }
+  }
+
+  // ── Feedback ──────────────────────────────────────────────────────────────
+  async function sendFeedback(idx, action) {
+    const place = results[idx];
+    const userId = getUserId();
+    try {
+      await fetch('/api/v1/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          place_id: place.place_id,
+          action,
+          category_hint: place.tags?.amenity
+            ? `amenity:${place.tags.amenity}`
+            : place.tags?.shop
+            ? `shop:${place.tags.shop}`
+            : null,
+        }),
+      });
+      if (action === 'like') {
+        document.getElementById(`like-${idx}`)?.classList.add('liked');
+        document.getElementById(`dislike-${idx}`)?.classList.remove('disliked');
+      } else if (action === 'dislike') {
+        document.getElementById(`dislike-${idx}`)?.classList.add('disliked');
+        document.getElementById(`like-${idx}`)?.classList.remove('liked');
+      }
+    } catch (e) {
+      console.error('Feedback error:', e);
+    }
+  }
+
+  // ── Clear Feedback ────────────────────────────────────────────────────────
+  async function clearFeedback() {
+    const userId = getUserId();
+    try {
+      await fetch(`/api/v1/feedback/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+      setStatus('✓ Personalization history cleared.');
+    } catch (e) {
+      setStatus('❌ Failed to clear history.');
+    }
+  }
+
+  // Enter key triggers search
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') search();
+  });
+</script>
+</body>
+</html>

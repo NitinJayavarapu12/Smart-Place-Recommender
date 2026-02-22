@@ -1,149 +1,130 @@
-import random
-import time
-import requests
-from typing import List, Optional, Dict, Any, Tuple
+import httpx
+import hashlib
 from cachetools import TTLCache
 
-# Multiple Overpass instances (fallbacks)
-OVERPASS_URLS = [
+# TTL cache: max 256 entries, 60s TTL
+_cache: TTLCache = TTLCache(maxsize=256, ttl=60)
+
+# Overpass endpoints (tried in order if one fails)
+OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.openstreetmap.ru/api/interpreter",
 ]
 
-# Cache results for 60 seconds to avoid repeated calls
-_cache = TTLCache(maxsize=256, ttl=60)
-
-CATEGORY_TO_TAGS = {
-    "coffee": [("amenity", "cafe")],
-    "cafe": [("amenity", "cafe")],
-    "restaurant": [("amenity", "restaurant")],
-    "fast_food": [("amenity", "fast_food")],
-    "park": [("leisure", "park")],
-    "gym": [("leisure", "fitness_centre")],
-    "bar": [("amenity", "bar")],
-    "pharmacy": [("amenity", "pharmacy")],
-    "hospital": [("amenity", "hospital")],
-    "library": [("amenity", "library")],
-    "supermarket": [("shop", "supermarket")],
+# OSM tag normalization
+CATEGORY_MAP = {
+    "cafe": "Cafe",
+    "restaurant": "Restaurant",
+    "fast_food": "Fast Food",
+    "bar": "Bar",
+    "pub": "Pub",
+    "pharmacy": "Pharmacy",
+    "hospital": "Hospital",
+    "clinic": "Clinic",
+    "doctors": "Doctor",
+    "dentist": "Dentist",
+    "supermarket": "Supermarket",
+    "convenience": "Convenience Store",
+    "bakery": "Bakery",
+    "library": "Library",
+    "park": "Park",
+    "gym": "Gym",
+    "fitness_centre": "Gym",
+    "hotel": "Hotel",
+    "hostel": "Hostel",
+    "museum": "Museum",
+    "cinema": "Cinema",
+    "theatre": "Theatre",
+    "bank": "Bank",
+    "atm": "ATM",
+    "fuel": "Gas Station",
+    "parking": "Parking",
+    "school": "School",
+    "university": "University",
+    "college": "College",
+    "place_of_worship": "Place of Worship",
+    "post_office": "Post Office",
+    "marketplace": "Market",
+    "food_court": "Food Court",
+    "ice_cream": "Ice Cream",
+    "juice_bar": "Juice Bar",
 }
 
 
-def _make_overpass_query(lat: float, lng: float, radius_m: int, categories: List[str]) -> str:
-    tag_filters: List[Tuple[str, str]] = []
-    for c in categories:
-        tag_filters.extend(CATEGORY_TO_TAGS.get(c.lower(), []))
+def _cache_key(lat: float, lng: float, radius_m: int) -> str:
+    raw = f"{lat:.4f}:{lng:.4f}:{radius_m}"
+    return hashlib.md5(raw.encode()).hexdigest()
 
-    if not tag_filters:
-        tag_filters = [("amenity", "cafe"), ("amenity", "restaurant"), ("leisure", "park")]
 
-    parts = []
-    for k, v in tag_filters:
-        parts.append(f'node["{k}"="{v}"](around:{radius_m},{lat},{lng});')
-        parts.append(f'way["{k}"="{v}"](around:{radius_m},{lat},{lng});')
-        parts.append(f'relation["{k}"="{v}"](around:{radius_m},{lat},{lng});')
-
+def _build_query(lat: float, lng: float, radius_m: int) -> str:
     return f"""
-    [out:json][timeout:25];
+    [out:json][timeout:20];
     (
-      {''.join(parts)}
+      node["amenity"](around:{radius_m},{lat},{lng});
+      node["shop"](around:{radius_m},{lat},{lng});
+      node["tourism"](around:{radius_m},{lat},{lng});
+      node["leisure"](around:{radius_m},{lat},{lng});
     );
-    out center tags;
+    out body;
     """
 
 
-def fetch_places(
-    lat: float,
-    lng: float,
-    radius_m: int,
-    categories: Optional[List[str]] = None,
-    open_now: bool = True,  # not supported reliably in OSM; kept for compatibility
-    limit: int = 25,
-) -> List[Dict[str, Any]]:
-    categories = categories or ["cafe", "restaurant", "park"]
+def _normalize_element(el: dict) -> dict | None:
+    tags = el.get("tags", {})
+    name = tags.get("name") or tags.get("name:en")
+    if not name:
+        return None
 
-    cache_key = (round(lat, 4), round(lng, 4), int(radius_m), tuple(sorted([c.lower() for c in categories])), int(limit))
-    if cache_key in _cache:
-        return _cache[cache_key]
+    for key in ("amenity", "shop", "tourism", "leisure"):
+        if key in tags:
+            raw_cat = tags[key]
+            category = CATEGORY_MAP.get(raw_cat, raw_cat.replace("_", " ").title())
+            category_hint = f"{key}:{raw_cat}"
+            break
+    else:
+        return None
 
-    query = _make_overpass_query(lat, lng, radius_m, categories)
+    return {
+        "place_id": f"osm:{el['type']}:{el['id']}",
+        "name": name,
+        "category": category,
+        "category_hint": category_hint,
+        "lat": el["lat"],
+        "lng": el["lon"],
+        "tags": {k: v for k, v in tags.items() if k != "name"},
+    }
 
-    last_err = None
-    urls = OVERPASS_URLS[:]
-    random.shuffle(urls)
 
-    # retry strategy: 3 attempts with small backoff
-    for attempt in range(1, 4):
-        for url in urls:
+async def fetch_places(lat: float, lng: float, radius_m: int) -> list[dict]:
+    key = _cache_key(lat, lng, radius_m)
+    if key in _cache:
+        return _cache[key]
+
+    query = _build_query(lat, lng, radius_m)
+    last_error = None
+
+    async with httpx.AsyncClient(timeout=25) as client:
+        for endpoint in OVERPASS_ENDPOINTS:
             try:
-                resp = requests.post(url, data={"data": query}, timeout=30)
+                resp = await client.post(endpoint, data={"data": query})
                 resp.raise_for_status()
                 data = resp.json()
-                places = normalize_places(data.get("elements", []))[:limit]
-                _cache[cache_key] = places
-                return places
-            except requests.RequestException as e:
-                last_err = e
+                elements = data.get("elements", [])
 
-        # backoff between attempts
-        time.sleep(0.6 * attempt)
+                seen = set()
+                results = []
+                for el in elements:
+                    place = _normalize_element(el)
+                    if place and place["place_id"] not in seen:
+                        seen.add(place["place_id"])
+                        results.append(place)
 
-    # If all fail, raise a clean error
-    raise RuntimeError(f"Overpass timed out/unavailable after retries. Last error: {last_err}")
+                _cache[key] = results
+                return results
 
-
-def normalize_places(elements: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    out = []
-
-    for el in elements:
-        tags = el.get("tags", {}) or {}
-        name = tags.get("name")
-        if not name:
-            continue
-
-        if "lat" in el and "lon" in el:
-            plat, plng = el["lat"], el["lon"]
-        else:
-            center = el.get("center") or {}
-            plat, plng = center.get("lat"), center.get("lon")
-            if plat is None or plng is None:
+            except Exception as e:
+                last_error = e
                 continue
 
-        categories = []
-        for key in ("amenity", "shop", "leisure", "tourism"):
-            if tags.get(key):
-                categories.append(f"{key}:{tags[key]}")
-
-        address_bits = [
-            tags.get("addr:housenumber"),
-            tags.get("addr:street"),
-            tags.get("addr:city"),
-            tags.get("addr:state"),
-            tags.get("addr:postcode"),
-        ]
-        address = " ".join([b for b in address_bits if b])
-
-        out.append(
-            {
-                "place_id": f"osm:{el.get('type')}:{el.get('id')}",
-                "name": name,
-                "address": address or None,
-                "lat": float(plat),
-                "lng": float(plng),
-                "rating": None,
-                "price_level": None,
-                "is_open": None,
-                "categories": categories,
-            }
-        )
-
-    # Deduplicate
-    seen = set()
-    deduped = []
-    for p in out:
-        if p["place_id"] in seen:
-            continue
-        seen.add(p["place_id"])
-        deduped.append(p)
-
-    return deduped
+    raise RuntimeError(f"All Overpass endpoints failed. Last error: {last_error}")
