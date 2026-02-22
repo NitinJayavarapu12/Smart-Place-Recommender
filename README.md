@@ -1,197 +1,281 @@
-# Smart Place Recommender
+# Smart Place Recommender v2
 
-Hybrid AI-powered nearby place recommender built with FastAPI.
+> 🚀 **[Live Demo → smart-place-recommender.onrender.com](https://smart-place-recommender.onrender.com)**
 
-This project combines semantic search (sentence embeddings), geographic ranking (Haversine distance), and user feedback personalization to generate intelligent place recommendations using OpenStreetMap data.
+> ⚠️ Hosted on Render's free tier — may take 30-50 seconds to wake up on first load.
 
-It is designed as a production-style backend project demonstrating:
-
-- API design with FastAPI
-- Hybrid ranking systems
-- Embedding-based semantic matching
-- Feedback-driven personalization
-- Caching + retry strategies
-- Clean modular architecture
+A hybrid AI-powered place recommendation engine built on **OpenStreetMap**. Type a natural language query like *"quiet coffee shop to work"* or *"lunch with friends"*, enter a city name, and get back intelligently ranked nearby places — no paid APIs required.
 
 ---
 
-## 🚀 Overview
+## Demo
 
-The Smart Place Recommender is a lightweight recommendation system that:
+![Smart Place Recommender UI](https://smart-place-recommender.onrender.com)
 
-1. Fetches nearby places from OpenStreetMap (Overpass API)
-2. Converts user queries and place descriptions into embeddings
-3. Ranks results using a hybrid scoring strategy
-4. Learns from user feedback (like/dislike/click)
-5. Returns personalized recommendations
-
-Example query:
-
-> "quiet coffee shop to work"
-
-The system boosts cafes over restaurants, ranks closer locations higher, and increases scores over time based on user preferences.
+**Try these queries:**
+- `"quiet coffee shop to work"` in New York, NY
+- `"lunch with friends"` in London, UK
+- `"nearest pharmacy"` in Tokyo, Japan
+- `"cozy romantic dinner spot"` in Paris, France
 
 ---
 
-## 🏗 Architecture
+## How It Works
 
-```
-User (Web UI)
-      │
-      ▼
-FastAPI Backend
-      │
-      ├── Web Layer (Jinja2 + Leaflet)
-      ├── API Layer (/recommend, /feedback)
-      ├── Ranking Engine
-      │      ├── Embeddings (MiniLM)
-      │      ├── Distance Scoring
-      │      ├── Keyword Boost
-      │      └── Personalization Boost
-      │
-      ├── Data Provider (Overpass API)
-      │      ├── Retry + Backoff
-      │      └── TTL Cache
-      │
-      └── SQLite DB (User Feedback)
-```
+Each place is scored using a **weighted combination of four signals**:
 
----
+| Signal | Default Weight | Description |
+|---|---|---|
+| Semantic Similarity | **52%** | Cosine similarity between MiniLM sentence embeddings of the query and place |
+| Distance Score | **33%** | Exponential decay based on Haversine distance from user location |
+| Keyword Match | **10%** | Rule-based category boost from query keywords |
+| Personalization | **5%** | Learned from user like / dislike / click history (SQLite) |
 
-## 🧠 How It Works
+### Dynamic Weight Shifting
 
-Final score is computed using:
+Weights shift automatically based on detected **query intent**:
 
-score =
-  0.52 * semantic_similarity +
-  0.33 * distance_score +
-  0.10 * keyword_match +
-  0.05 * personalization_boost
+| Query Type | Example | Behavior |
+|---|---|---|
+| Distance-priority | `"nearest pharmacy"` | Distance weight → **55%**, Semantic → 30% |
+| Semantic-priority | `"cozy romantic atmosphere"` | Semantic weight → **65%**, Distance → 20% |
+| Balanced | `"coffee shop to work"` | Default weights apply |
 
-Where:
+### Category Penalties
 
-- **Semantic Similarity** → Sentence embeddings (MiniLM)
-- **Distance Score** → Haversine distance normalization
-- **Keyword Boost** → Simple rule-based category boosts
-- **Personalization Boost** → Learned from user feedback (SQLite)
+Irrelevant categories are actively penalized for certain queries. For example, searching *"lunch with friends"* will suppress churches, schools, parking lots, and gas stations from results — even if their embeddings are semantically close.
 
 ---
 
-## 🌐 How to Use
+## Features
 
-### Web UI
-
-Open:
-
-```
-http://127.0.0.1:8000/
-```
-
-You can:
-
-- Enter a query
-- Adjust radius and result count
-- See ranked results
-- View map pins
-- Like / Dislike places
-- Re-run search to see personalization effects
+- 🔍 **Natural language search** — describe what you want, not just a category
+- 📍 **Location by city name** — type "Tokyo" instead of coordinates; click map to set location
+- 🧠 **AI semantic matching** — MiniLM sentence embeddings understand context and vibe
+- 📏 **Smart distance scoring** — closer places ranked higher with exponential decay
+- 🎯 **Keyword boosting** — food queries boost restaurants/cafes, gym queries boost fitness centers
+- 🚫 **Category penalties** — food queries suppress churches, schools, parking lots
+- 👍 **Personalization** — like/dislike places to influence future results
+- 🗺️ **Interactive map** — color-coded markers (green = high score, orange = medium, red = lower)
+- 📊 **Score breakdown** — see exactly why each place was ranked where it was
+- ⚡ **Caching** — Overpass API responses cached 60s, embeddings cached in LRU cache
+- 🔄 **Retry logic** — falls back across 3 Overpass endpoints if one fails
+- 📖 **Auto API docs** — full interactive docs at `/docs` and `/redoc`
 
 ---
 
-### API Endpoints
+## API Endpoints
 
-#### Health Check
+All endpoints are under `/api/v1`.
 
-```
-GET /health
-```
+### `GET /api/v1/health`
+Returns service status and model info.
 
-#### Recommend Places
-
-```
-POST /recommend
-```
-
-Example request body:
-
+**Response:**
 ```json
 {
-  "lat": 30.4213,
-  "lng": -87.2169,
-  "query": "coffee shop to work",
-  "radius_m": 2000,
-  "max_results": 5,
-  "open_now": true,
-  "user_id": "demo_user"
+  "status": "ok",
+  "version": "2.0.0",
+  "embedding_model": "all-MiniLM-L6-v2"
 }
 ```
 
-#### Submit Feedback
+---
 
-```
-POST /feedback
-```
+### `POST /api/v1/recommend`
+Get ranked place recommendations for a location and query.
 
+**Request:**
 ```json
 {
-  "user_id": "demo_user",
+  "lat": 40.7128,
+  "lng": -74.0060,
+  "query": "quiet coffee shop to work",
+  "radius_m": 1500,
+  "max_results": 10,
+  "open_now": false,
+  "user_id": "user_123"
+}
+```
+
+**Response:**
+```json
+{
+  "query": "quiet coffee shop to work",
+  "total_fetched": 312,
+  "total_returned": 10,
+  "results": [
+    {
+      "place_id": "osm:node:123456",
+      "name": "Blue Bottle Coffee",
+      "category": "Cafe",
+      "lat": 40.7142,
+      "lng": -74.0035,
+      "distance_m": 187.3,
+      "tags": { "amenity": "cafe", "cuisine": "coffee_shop" },
+      "score": {
+        "semantic": 0.8421,
+        "distance": 0.7102,
+        "keyword": 1.0,
+        "personalization": 0.0,
+        "final": 0.6934
+      }
+    }
+  ]
+}
+```
+
+---
+
+### `POST /api/v1/feedback`
+Submit a like, dislike, or click to personalize future recommendations.
+
+**Request:**
+```json
+{
+  "user_id": "user_123",
   "place_id": "osm:node:123456",
   "action": "like",
   "category_hint": "amenity:cafe"
 }
 ```
 
-#### Clear Feedback
+Actions: `like` · `dislike` · `click`
+
+---
+
+### `DELETE /api/v1/feedback/{user_id}`
+Clear all personalization history for a user.
+
+---
+
+## Architecture
 
 ```
-DELETE /feedback/{user_id}
+User (Browser)
+      │
+      ▼
+FastAPI (app/main.py)
+      │
+      ├── Static UI  (static/index.html)
+      │     ├── Leaflet.js map
+      │     ├── Nominatim geocoding (city name → lat/lng)
+      │     ├── Score breakdown bars per result
+      │     └── Like / Dislike / Visit feedback buttons
+      │
+      └── /api/v1/ (app/api/routes.py)
+              │
+              ├── Ranking Engine (app/services/ranker.py)
+              │     ├── Query Intent Detection → Dynamic Weights
+              │     ├── Sentence Embeddings   (MiniLM, batch + LRU cache)
+              │     ├── Haversine Distance Score
+              │     ├── Keyword Category Boost
+              │     ├── Category Penalties
+              │     └── Personalization Boost
+              │
+              ├── Overpass Provider (app/services/places_provider.py)
+              │     ├── Multi-endpoint Retry + Fallback
+              │     └── TTL Cache (60s)
+              │
+              └── Personalization (app/services/personalization.py)
+                    └── SQLite (feedback.db)
 ```
 
-## 🔥 Demo Flow (Personalization Example)
+---
 
-1. Search: `"coffee shop to work"`
-2. Like multiple cafes
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend framework | FastAPI |
+| AI / Embeddings | Sentence Transformers (all-MiniLM-L6-v2) |
+| Place data | OpenStreetMap via Overpass API |
+| Geocoding | Nominatim (OpenStreetMap) |
+| Feedback storage | SQLite |
+| Frontend map | Leaflet.js |
+| Caching | cachetools (LRU + TTL) |
+| HTTP client | httpx |
+| Hosting | Render (free tier) |
+
+---
+
+## Run Locally
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/NitinJayavarapu12/Smart-Place-Recommender.git
+cd Smart-Place-Recommender
+
+# 2. Create and activate virtual environment
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Mac/Linux
+source .venv/bin/activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Start the server
+uvicorn app.main:app --reload
+```
+
+Then open:
+- **UI** → `http://localhost:8000`
+- **API Docs** → `http://localhost:8000/docs`
+- **ReDoc** → `http://localhost:8000/redoc`
+
+---
+
+## Project Structure
+
+```
+Smart-Place-Recommender/
+├── app/
+│   ├── api/
+│   │   ├── routes.py          # API endpoint definitions
+│   │   └── schemas.py         # Request / response Pydantic models
+│   ├── services/
+│   │   ├── ranker.py          # Hybrid scoring engine + dynamic weights
+│   │   ├── embedder.py        # MiniLM embeddings with LRU cache
+│   │   ├── places_provider.py # Overpass API fetcher + TTL cache
+│   │   └── personalization.py # SQLite feedback store
+│   └── main.py                # FastAPI app entry point
+├── static/
+│   └── index.html             # Single-page UI (Leaflet map + search)
+├── requirements.txt
+├── render.yaml                # Render deployment config
+└── README.md
+```
+
+---
+
+## Personalization Demo
+
+1. Search `"coffee shop to work"` in your city
+2. **Like** several cafes in the results
 3. Search again
-4. Observe:
-   - `personal_boost` increases
-   - Cafe scores increase
-   - Restaurants drop in ranking
+4. Notice `personalization` score increases for cafes
+5. Cafes rank higher, other categories drop
 
-This demonstrates a real feedback learning loop.
+This demonstrates a real feedback learning loop without any ML model training — just lightweight SQLite-backed preference tracking.
 
 ---
 
-## ⚡ Performance Optimizations
+## Design Decisions
 
-- Cached place embeddings by text hash
-- Cached Overpass API responses (TTL 60s)
-- Retry + fallback across multiple Overpass endpoints
-- LRU-loaded embedding model
-- Normalized semantic scoring
+**Why OpenStreetMap over Google Places?**
+No API key, no billing, no rate limit surprises. OSM has excellent global coverage and is completely free.
 
----
+**Why MiniLM over larger models?**
+It's fast enough to run on a free Render instance, fits in memory, and performs well for short semantic queries. A larger model would improve accuracy but kill cold-start time.
 
-## 🗺️ Data Source
+**Why SQLite over a full database?**
+This is a portfolio project. SQLite is zero-config, file-based, and sufficient for demonstrating personalization concepts without infrastructure overhead.
 
-Data is retrieved from:
-
-- **OpenStreetMap (Overpass API)**
-
-Features:
-- Retry + fallback endpoints
-- 60-second TTL cache
-- Automatic deduplication
-- Basic category normalization
-
-No paid APIs required.
+**Why dynamic weights instead of a fixed formula?**
+Real-world queries have different intents. "Nearest ATM" and "cozy romantic dinner" should not use the same scoring weights — one is purely proximity-driven, the other is vibe-driven.
 
 ---
-
-## ▶️ Run Locally
-
-- git clone ...
-- cd ...
-- python -m venv .venv
-- pip install -r requirements.txt
-- uvicorn app.main:app --reload
-
