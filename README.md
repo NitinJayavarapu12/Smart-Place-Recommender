@@ -8,8 +8,6 @@
 
 ## Demo
 
-![Smart Place Recommender UI](https://smart-place-recommender.onrender.com)
-
 **Try these queries:**
 - `"quiet coffee shop to work"` in New York, NY
 - `"lunch with friends"` in London, UK
