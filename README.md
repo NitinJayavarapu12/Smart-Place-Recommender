@@ -1,10 +1,8 @@
 # Smart Place Recommender v2
 
+> A hybrid AI-powered place recommendation engine built on **OpenStreetMap**. Type a natural language query like *"quiet coffee shop to work"* or *"lunch with friends"*, enter a city name, and get back intelligently ranked nearby places — no paid APIs required.
+
 > 🚀 **[Live Demo → smart-place-recommender.onrender.com](https://smart-place-recommender.onrender.com)**
-
-> ⚠️ Hosted on Render's free tier — may take 30-50 seconds to wake up on first load.
-
-A hybrid AI-powered place recommendation engine built on **OpenStreetMap**. Type a natural language query like *"quiet coffee shop to work"* or *"lunch with friends"*, enter a city name, and get back intelligently ranked nearby places — no paid APIs required.
 
 ---
 
